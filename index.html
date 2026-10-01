@@ -588,7 +588,7 @@ const API = Object.freeze({
 
 /* Bases independentes das redes municipal de assistência social e saúde. */
 const DATA_URL = "./dados/equipamentos_niteroi.csv?v=2";
-const HEALTH_DATA_URL = "./dados/equipamentos_saude_niteroi.csv?v=3";
+const HEALTH_DATA_URL = "./dados/equipamentos_saude_niteroi.csv?v=4";
         
         /* 4.2 — Ordem dos filtros e paleta visual. */
         const REGION_ORDER = [
@@ -785,6 +785,40 @@ async function getGeoJSON(url) {
   return j;
 }
 
+/* Testa se um ponto WGS84 está dentro de um anel GeoJSON. */
+function pointInRing(longitude, latitude, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const crosses =
+      yi > latitude !== yj > latitude &&
+      longitude < ((xj - xi) * (latitude - yi)) / (yj - yi) + xi;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+/* Resolve a região administrativa de pontos pelos polígonos oficiais do SIG. */
+function administrativeRegionForPoint(longitude, latitude, geo) {
+  for (const feature of geo.features || []) {
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    const polygons =
+      geometry.type === "Polygon"
+        ? [geometry.coordinates]
+        : geometry.type === "MultiPolygon"
+          ? geometry.coordinates
+          : [];
+    const belongs = polygons.some((rings) =>
+      pointInRing(longitude, latitude, rings[0]) &&
+      !rings.slice(1).some((hole) => pointInRing(longitude, latitude, hole)),
+    );
+    if (belongs) return clean(feature.properties?.tx_nome);
+  }
+  return "";
+}
+
 
 /* 5.9 — Agrupa os equipamentos em categorias de filtro. */
 function category(p) {
@@ -965,7 +999,8 @@ function buildHealthRecords(csvData) {
     categoria: clean(row["Tipo do serviço"]),
     endereco: clean(row["Endereço"]),
     bairro: clean(row["Bairro"]),
-    regiao: clean(row["Região de Saúde"]),
+    regiao: "",
+    regiaoSaude: clean(row["Região de Saúde"]),
     latitude: parseCoordinate(row["Latitude"]),
     longitude: parseCoordinate(row["Longitude"]),
     horario: clean(row["Horário de funcionamento"]),
@@ -1048,6 +1083,7 @@ function buildHealthRecords(csvData) {
             field("Endereço", p.endereco) +
             field("Bairro", p.bairro) +
             field("Região administrativa", p.regiao) +
+            field("Região de Saúde", p.regiaoSaude) +
             field("Horário de funcionamento", p.horario) +
             field("Telefone", p.telefone) +
             field("E-mail", p.email, { link: true }) +
@@ -1082,7 +1118,9 @@ function buildHealthRecords(csvData) {
             }
           });
           healthMarkers.forEach(({ marker, record }) => {
-            if (activeHealthTypes.has(record.categoria)) {
+            const okRegion =
+              selectedRegion === "Todas" || record.regiao === selectedRegion;
+            if (okRegion && activeHealthTypes.has(record.categoria)) {
               marker.addTo(healthMarkerLayer);
               visible++;
             }
@@ -1302,6 +1340,10 @@ async function init() {
       const lat = record.latitude;
       const lon = record.longitude;
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      record.regiao = administrativeRegionForPoint(lon, lat, regions);
+      if (!record.regiao) {
+        console.warn("Equipamento de Saúde fora das regiões administrativas:", record.nome);
+      }
       const marker = L.circleMarker([lat, lon], markerStyle(record), {
         pane: "markerPane",
       }).bindTooltip(record.nome, {
