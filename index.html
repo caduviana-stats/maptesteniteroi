@@ -588,7 +588,7 @@ const API = Object.freeze({
 
 /* Bases independentes das redes municipal de assistência social e saúde. */
 const DATA_URL = "./dados/equipamentos_niteroi.csv?v=2";
-const HEALTH_DATA_URL = "./dados/equipamentos_saude_niteroi.csv?v=1";
+const HEALTH_DATA_URL = "./dados/equipamentos_saude_niteroi.csv?v=3";
         
         /* 4.2 — Ordem dos filtros e paleta visual. */
         const REGION_ORDER = [
@@ -669,7 +669,7 @@ function parseCoordinate(value) {
 }
 
 /* 5.3 — Lê uma linha CSV respeitando campos entre aspas. */
-function parseCSVLine(line) {
+function parseCSVLine(line, delimiter = ",") {
   const values = [];
   let value = "";
   let insideQuotes = false;
@@ -683,7 +683,7 @@ function parseCSVLine(line) {
       i++;
     } else if (char === '"') {
       insideQuotes = !insideQuotes;
-    } else if (char === "," && !insideQuotes) {
+    } else if (char === delimiter && !insideQuotes) {
       values.push(value);
       value = "";
     } else {
@@ -710,10 +710,18 @@ async function getCSV(url) {
     .split(/\r?\n/)
     .filter((line) => line.trim());
 
-  const headers = parseCSVLine(lines[0]).map(clean);
+  if (!lines.length) {
+    throw new Error("O arquivo CSV está vazio.");
+  }
+
+  /* Aceita CSV exportado com vírgula ou ponto e vírgula. */
+  const commaHeaders = parseCSVLine(lines[0], ",");
+  const semicolonHeaders = parseCSVLine(lines[0], ";");
+  const delimiter = semicolonHeaders.length > commaHeaders.length ? ";" : ",";
+  const headers = (delimiter === ";" ? semicolonHeaders : commaHeaders).map(clean);
 
   return lines.slice(1).map((line) => {
-    const values = parseCSVLine(line);
+    const values = parseCSVLine(line, delimiter);
     const row = {};
 
     headers.forEach((header, index) => {
@@ -1312,10 +1320,12 @@ async function init() {
     /* Atualiza a informação exibida no painel lateral. */
     const status = document.getElementById("status");
     status.textContent = healthDataUnavailable
-      ? `${records.length} registros de Assistência carregados. A base de Saúde não foi encontrada. Envie dados/equipamentos_saude_niteroi.csv ao repositório.`
-      : `${records.length} registros de Assistência e ${healthRecords.length} registros de Saúde carregados. ` +
-        `${healthMarkers.length} pontos de Saúde com coordenadas; ${healthRecords.length - healthMarkers.length} sem ponto validado.`;
-    if (healthDataUnavailable) status.classList.add("error");
+      ? `${records.length} registros de Assistência carregados. A base de Saúde não foi encontrada ou está vazia. Confira dados/equipamentos_saude_niteroi.csv.`
+      : healthRecords.length === 0
+        ? `${records.length} registros de Assistência carregados. O CSV da Saúde abriu, mas nenhuma linha foi reconhecida. Confira o cabeçalho e o conteúdo do arquivo.`
+        : `${records.length} registros de Assistência e ${healthRecords.length} registros de Saúde carregados. ` +
+          `${healthMarkers.length} pontos de Saúde com coordenadas; ${healthRecords.length - healthMarkers.length} sem ponto validado.`;
+    if (healthDataUnavailable || healthRecords.length === 0) status.classList.add("error");
 
     /* Ajusta o enquadramento inicial às regiões de Niterói. */
     const bounds = L.geoJSON(regions).getBounds();
