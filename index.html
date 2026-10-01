@@ -1220,16 +1220,24 @@ function buildHealthRecords(csvData) {
         
 async function init() {
   try {
-    /* Carrega as regiões, os bairros e a base consolidada. */
-const [regions, csvData, healthCsvData] = await Promise.all([
-  getGeoJSON(API.regions),
-  getCSV(DATA_URL),
-  getCSV(HEALTH_DATA_URL),
-]);
+    /* Carrega os limites e a base socioassistencial. */
+    const [regions, csvData] = await Promise.all([
+      getGeoJSON(API.regions),
+      getCSV(DATA_URL),
+    ]);
 
-    /* Constrói as bases das duas redes separadamente. */
+    /* A base social continua funcionando se o CSV de Saúde ainda não
+       tiver sido enviado para a pasta dados/ do repositório. */
     records = buildRecords(csvData);
-    healthRecords = buildHealthRecords(healthCsvData);
+    let healthDataUnavailable = false;
+    try {
+      const healthCsvData = await getCSV(HEALTH_DATA_URL);
+      healthRecords = buildHealthRecords(healthCsvData);
+    } catch (healthError) {
+      console.error("Não foi possível carregar a base de Saúde:", healthError);
+      healthRecords = [];
+      healthDataUnavailable = true;
+    }
 
     console.log(
   "Lélia Gonzalez:",
@@ -1302,9 +1310,12 @@ const [regions, csvData, healthCsvData] = await Promise.all([
     setupSearch();
 
     /* Atualiza a informação exibida no painel lateral. */
-    document.getElementById("status").textContent =
-      `${records.length} registros de Assistência e ${healthRecords.length} registros de Saúde carregados. ` +
-      `${healthMarkers.length} pontos de Saúde com coordenadas; ${healthRecords.length - healthMarkers.length} sem ponto validado.`;
+    const status = document.getElementById("status");
+    status.textContent = healthDataUnavailable
+      ? `${records.length} registros de Assistência carregados. A base de Saúde não foi encontrada. Envie dados/equipamentos_saude_niteroi.csv ao repositório.`
+      : `${records.length} registros de Assistência e ${healthRecords.length} registros de Saúde carregados. ` +
+        `${healthMarkers.length} pontos de Saúde com coordenadas; ${healthRecords.length - healthMarkers.length} sem ponto validado.`;
+    if (healthDataUnavailable) status.classList.add("error");
 
     /* Ajusta o enquadramento inicial às regiões de Niterói. */
     const bounds = L.geoJSON(regions).getBounds();
