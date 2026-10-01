@@ -1,0 +1,1350 @@
+<!doctype html>
+<!--
+<!--
+===============================================================================
+MAPA INTEGRADO DA ASSISTÊNCIA SOCIAL E DA SAÚDE DE NITERÓI
+===============================================================================
+
+## Estrutura do arquivo
+
+1. Metadados e dependências
+2. Identidade visual (CSS)
+3. Estrutura da interface (HTML)
+4. Configurações e fontes de dados
+5. Funções utilitárias
+6. Construção da base de equipamentos
+7. Configuração do mapa Leaflet
+8. Painel de detalhes, marcadores e regiões
+9. Filtros, busca e navegação
+10. Inicialização da aplicação
+
+## Funcionamento geral
+
+- Utiliza um CSV consolidado como fonte principal dos equipamentos
+  socioassistenciais de Niterói.
+- O CSV reúne os dados cadastrais, territoriais e as coordenadas de
+  latitude e longitude dos equipamentos.
+- Consulta o SIG Niterói para obter os limites oficiais das cinco
+  regiões administrativas.
+- Posiciona os equipamentos diretamente pelas coordenadas disponíveis
+  na base consolidada.
+- Permite filtrar os equipamentos por região administrativa e tipo
+  de serviço.
+- Disponibiliza pesquisa textual e painel com informações detalhadas
+  de cada equipamento.
+
+## Fontes de dados
+
+- Equipamentos: dados/equipamentos_niteroi.csv
+- Regiões administrativas: SIG Niterói
+
+## Manutenção rápida
+
+- Fonte dos equipamentos: constante DATA_URL, seção 4.1.
+- Fonte territorial: objeto API, seção 4.1.
+- Cores das regiões e dos equipamentos: seção 4.2.
+- Tratamento do CSV: funções da seção 5.
+- Classificação dos equipamentos: função category(), seção 5.
+- Construção dos registros: função buildRecords(), seção 6.
+- Inicialização e carregamento dos dados: função init(), seção 10.
+
+===============================================================================
+-->
+
+<html lang="pt-BR">
+  <head>
+    <!-- ================= 1. METADADOS E DEPENDÊNCIAS ================= -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Mapa interativo das redes de assistência social e saúde de Niterói"
+    />
+    <title>Mapa Integrado das Redes de Niterói</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <!-- =================== 2. IDENTIDADE VISUAL ====================== -->
+    <style>
+      /* 2.1 — Variáveis globais da paleta */
+      :root {
+        --navy: #0f172a;
+        --blue: #0f172a;
+        --paper: #f8fafc;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --line: #e5e7eb;
+        --shadow: 0 14px 35px rgba(15, 23, 42, 0.12);
+        --orange: #f97316;
+        --yellow: #facc15;
+        --red: #dc2626;
+        --purple: #5b2c83;
+      }
+      /* 2.2 — Normalização e estrutura principal */
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        color: var(--ink);
+        background: var(--paper);
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      .app {
+        height: 100%;
+        display: grid;
+        grid-template-rows: 64px 1fr;
+      }
+      /* 2.3 — Cabeçalho, marca institucional e pesquisa */
+      .topbar {
+        z-index: 1000;
+        background: rgba(255, 255, 255, 0.96);
+        color: var(--ink);
+        padding: 0 22px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(12px);
+      }
+      .brand {
+        min-width: 330px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .brand-mark {
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: #0f172a;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .brand h1 {
+        font-size: 16px;
+        line-height: 1.1;
+        margin: 0;
+      }
+      .brand p {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 2px 0 0;
+      }
+      .search-wrap {
+        position: relative;
+        flex: 1;
+        max-width: 620px;
+      }
+      .search {
+        width: 100%;
+        height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 44px;
+        color: var(--ink);
+        background: #f8fafc;
+        outline: none;
+      }
+      .search:focus {
+        border-color: #94a3b8;
+        background: #fff;
+        box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18);
+      }
+      .search-icon {
+        position: absolute;
+        left: 17px;
+        top: 7px;
+        color: #94a3b8;
+        font-size: 22px;
+      }
+      .results {
+        display: none;
+        position: absolute;
+        top: 52px;
+        left: 0;
+        right: 0;
+        background: #fff;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .result {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+      .result:hover {
+        background: #f8fafc;
+      }
+      .result b {
+        display: block;
+        font-size: 13px;
+      }
+      .result span {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      /* 2.4 — Área do mapa e painel lateral */
+      .workspace {
+        position: relative;
+        min-height: 0;
+      }
+      .sidebar {
+        position: absolute;
+        z-index: 900;
+        left: 16px;
+        top: 18px;
+        width: 310px;
+        max-height: calc(100% - 36px);
+        overflow: auto;
+        background: rgba(255, 255, 255, 0.96);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+      }
+      .section {
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .section:last-child {
+        border: 0;
+      }
+      .section h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin: 0 0 12px;
+        color: #334155;
+      }
+      .summary {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+      }
+      .summary strong {
+        font-size: 26px;
+        color: #0f172a;
+      }
+      .summary span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .region-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .filter-btn {
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 10px;
+        padding: 8px;
+        text-align: left;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .filter-btn:hover {
+        background: #f8fafc;
+      }
+      .filter-btn.active {
+        background: #0f172a;
+        border-color: #0f172a;
+        color: #fff;
+      }
+      .filter-btn.all {
+        grid-column: 1/-1;
+        text-align: center;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        font-size: 13px;
+      }
+      .check input {
+        accent-color: #0f172a;
+      }
+      .type-list {
+        max-height: 210px;
+        overflow: auto;
+      }
+      .status {
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      .error {
+        color: #a31717;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        flex: none;
+      }
+      /* 2.5 — Mapa Leaflet, rótulos e tooltips */
+      #map {
+        height: 100%;
+        width: 100%;
+        background: #e9edf1;
+      }
+      .leaflet-control-zoom {
+        margin-top: 14px !important;
+      }
+      .region-label {
+        background: #fff;
+        border: 1px solid #9aaabd;
+        border-radius: 5px;
+        box-shadow: 0 1px 5px #1b2a3d30;
+        color: #24364b;
+        font-weight: 700;
+        font-size: 11px;
+        padding: 3px 6px;
+      }
+      .region-label:before {
+        display: none;
+      }
+      .equip-tooltip {
+        background: #fff;
+        border: 0;
+        border-radius: 6px;
+        box-shadow: 0 4px 14px #112d4e3b;
+        font-weight: 650;
+        color: #203247;
+      }
+      .leaflet-labels-pane {
+        pointer-events: none;
+        filter: grayscale(1);
+        opacity: 0.72;
+      }
+      /* 2.6 — Painel de detalhes */
+      .drawer {
+        position: absolute;
+        z-index: 1100;
+        right: 16px;
+        top: 18px;
+        max-height: calc(100% - 36px);
+        width: min(380px, calc(100% - 32px));
+        background: rgba(255, 255, 255, 0.98);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+        transform: translateX(430px);
+        transition: transform 0.25s ease;
+        display: flex;
+        flex-direction: column;
+        pointer-events: none;
+      }
+      .drawer.open {
+        transform: none;
+        pointer-events: auto;
+      }
+      .drawer-head {
+        padding: 18px 18px 14px;
+        border-bottom: 1px solid var(--line);
+        position: relative;
+      }
+      .badge {
+        display: inline-block;
+        color: #fff;
+        border-radius: 999px;
+        padding: 4px 9px;
+        font-size: 11px;
+        font-weight: 750;
+        margin-bottom: 9px;
+        background: var(--blue);
+      }
+      .drawer h2 {
+        font-size: 20px;
+        line-height: 1.15;
+        margin: 0;
+        padding-right: 35px;
+      }
+      .close {
+        position: absolute;
+        right: 14px;
+        top: 14px;
+        border: 0;
+        background: #f1f5f9;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 20px;
+      }
+      .drawer-body {
+        padding: 8px 18px 22px;
+        overflow: auto;
+      }
+      .field {
+        padding: 12px 0;
+        border-bottom: 1px solid #edf1f5;
+      }
+      .field b {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 5px;
+      }
+      .field div,
+      .field a {
+        font-size: 14px;
+        line-height: 1.45;
+        color: #0f172a;
+      }
+      .field a {
+        color: #5b2c83;
+      }
+      .muted {
+        color: #64748b !important;
+      }
+      .loading {
+        position: absolute;
+        z-index: 1200;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #f8fafcdd;
+      }
+      .loading-card {
+        background: #fff;
+        padding: 18px 22px;
+        border-radius: 16px;
+        box-shadow: var(--shadow);
+        font-weight: 650;
+        color: #0f172a;
+      }
+      /* 2.7 — Responsividade */
+      @media (max-width: 760px) {
+        .app {
+          grid-template-rows: auto 1fr;
+        }
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+          gap: 10px;
+          padding: 10px 12px;
+        }
+        .brand {
+          min-width: 0;
+        }
+        .brand p {
+          display: none;
+        }
+        .workspace {
+          min-height: 0;
+        }
+        .sidebar {
+          left: 8px;
+          top: 8px;
+          width: 245px;
+          max-height: 47%;
+        }
+        .section {
+          padding: 11px;
+        }
+        .region-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .drawer {
+          height: 64%;
+          width: calc(100% - 16px);
+          right: 8px;
+          top: auto;
+          bottom: 8px;
+          transform: translateY(110%);
+          border-radius: 20px;
+        }
+        .drawer.open {
+          transform: none;
+        }
+        .leaflet-control-zoom {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ================= 3. ESTRUTURA DA INTERFACE =================== -->
+    <main class="app">
+      <!-- 3.1 — Cabeçalho e pesquisa textual -->
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">SMAS</div>
+          <div>
+            <h1>Assistência Social e Saúde de Niterói</h1>
+            <p>Serviços, equipamentos e regiões administrativas</p>
+          </div>
+        </div>
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span
+          ><input
+            id="search"
+            class="search"
+            type="search"
+            placeholder="Buscar por nome, serviço, bairro ou endereço"
+            autocomplete="off"
+          />
+          <div id="results" class="results"></div>
+        </div>
+      </header>
+      <!-- 3.2 — Mapa, filtros, detalhes e carregamento -->
+      <section class="workspace">
+        <div
+          id="map"
+          aria-label="Mapa dos equipamentos socioassistenciais de Niterói"
+        ></div>
+        <aside class="sidebar" aria-label="Filtros do mapa">
+          <div class="section">
+            <div class="summary">
+              <strong id="count">0</strong><span>equipamentos visíveis</span>
+            </div>
+          </div>
+          <div class="section">
+            <h2>Região administrativa</h2>
+            <div id="regions" class="region-grid"></div>
+          </div>
+          <div class="section">
+            <h2>Assistência social</h2>
+            <div id="types" class="type-list"></div>
+          </div>
+          <div class="section">
+            <h2>Saúde municipal</h2>
+            <p class="status">Ative ou desative os tipos de equipamento da Saúde independentemente das camadas da Assistência Social.</p>
+            <div id="healthTypes" class="type-list"></div>
+          </div>
+          <div class="section">
+            <label class="check"
+              ><input id="showRegions" type="checkbox" checked /> Exibir limites
+              e nomes das regiões</label
+            >
+            <div id="status" class="status">Carregando dados oficiais…</div>
+          </div>
+        </aside>
+        <aside id="drawer" class="drawer" aria-label="Detalhes do equipamento">
+          <div class="drawer-head">
+            <button id="close" class="close" aria-label="Fechar">×</button
+            ><span id="badge" class="badge"></span>
+            <h2 id="title"></h2>
+          </div>
+          <div id="details" class="drawer-body"></div>
+        </aside>
+        <div id="loading" class="loading">
+          <div class="loading-card">Carregando o mapa de Niterói…</div>
+        </div>
+      </section>
+    </main>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      crossorigin=""
+    ></script>
+    <script>
+      (() => {
+        "use strict";
+
+        /* ====================================================================
+         * 4. CONFIGURAÇÕES E FONTES DE DADOS
+         * ==================================================================== */
+
+       /* 4.1 — Fontes de dados.
+ *
+ * O CSV consolidado é a fonte principal dos equipamentos,
+ * incluindo suas coordenadas de latitude e longitude.
+ *
+ * O SIG Niterói permanece responsável pelas camadas
+ * territoriais utilizadas no mapa.
+ */
+const API = Object.freeze({
+  regions:
+    "https://services8.arcgis.com/TpaOLI1HCh5AcRQB/arcgis/rest/services/Grouplayer_camadas_agol/FeatureServer/2/query",
+});
+
+/* Bases independentes das redes municipal de assistência social e saúde. */
+const DATA_URL = "./dados/equipamentos_niteroi.csv?v=2";
+const HEALTH_DATA_URL = "./dados/equipamentos_saude_niteroi.csv?v=1";
+        
+        /* 4.2 — Ordem dos filtros e paleta visual. */
+        const REGION_ORDER = [
+          "Leste",
+          "Norte",
+          "Oceânica",
+          "Pendotiba",
+          "Praias da Baía",
+        ];
+        const REGION_COLORS = {
+          Leste: "#F2DF3A",
+          Norte: "#62C6C2",
+          Oceânica: "#A8CD45",
+          Pendotiba: "#F97316",
+          "Praias da Baía": "#7C3AED",
+        };
+        const TYPE_COLORS = {
+          CRAS: "#FACC15",
+          CREAS: "#DC2626",
+          "Centro POP": "#16A34A",
+          "Unidade de Acolhimento": "#5B2C83",
+          "Conselho Tutelar": "#000000",
+          "Banco Araribóia": "#2563EB",
+          "Segurança Alimentar": "#8B4513",
+          "Economia Solidária": "#F97316",
+          "Centro de Convivência": "#EC4899",
+          "Gestão e Conselhos": "#808080",
+          "Outros serviços": "#64748B",
+        };
+        const HEALTH_COLORS = {
+          "Módulo do Médico de Família": "#0284C7",
+          "Unidade Básica de Saúde": "#0F766E",
+          "SAMU": "#DC2626",
+          "Policlínica": "#7C3AED",
+          "Hospital": "#B91C1C",
+          "Hospital Psiquiátrico": "#9333EA",
+          "Maternidade": "#DB2777",
+          "Unidade de Pronto Atendimento": "#EA580C",
+          "Serviço de Pronto Atendimento": "#C2410C",
+          "Unidade de Urgência": "#D97706",
+          "Consultório na Rua": "#0891B2",
+          "CAPS II": "#6D28D9",
+          "CAPS AD III": "#7E22CE",
+          "CAPS i": "#A21CAF",
+          "Centro de Convivência e Cultura": "#BE185D",
+          "Unidade de Acolhimento em Saúde": "#C026D3",
+          "Serviço Residencial Terapêutico": "#9333EA",
+          "Ambulatório Ampliado de Saúde Mental": "#4F46E5",
+        };
+        /* ====================================================================
+         * 5. FUNÇÕES UTILITÁRIAS
+         * ==================================================================== */
+
+       /* ====================================================================
+ * 5. FUNÇÕES UTILITÁRIAS
+ * ==================================================================== */
+
+/* 5.1 — Limpa espaços, caracteres invisíveis e valores nulos. */
+const clean = (v) =>
+  v == null
+    ? ""
+    : String(v)
+        .replace(/\u00ad/g, "-")
+        .replace(/\s+/g, " ")
+        .trim();
+
+/* 5.2 — Converte latitude e longitude para números. */
+function parseCoordinate(value) {
+  if (value == null || value === "") return null;
+
+  const number = Number(
+    String(value)
+      .trim()
+      .replace(",", ".")
+  );
+
+  return Number.isFinite(number) ? number : null;
+}
+
+/* 5.3 — Lê uma linha CSV respeitando campos entre aspas. */
+function parseCSVLine(line) {
+  const values = [];
+  let value = "";
+  let insideQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"' && insideQuotes && next === '"') {
+      value += '"';
+      i++;
+    } else if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === "," && !insideQuotes) {
+      values.push(value);
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  values.push(value);
+  return values;
+}
+
+/* 5.4 — Carrega o CSV e transforma cada linha em um objeto. */
+async function getCSV(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error("Não foi possível carregar a base de equipamentos.");
+  }
+
+  const text = await response.text();
+
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+
+  const headers = parseCSVLine(lines[0]).map(clean);
+
+  return lines.slice(1).map((line) => {
+    const values = parseCSVLine(line);
+    const row = {};
+
+    headers.forEach((header, index) => {
+      row[header] = clean(values[index]);
+    });
+
+    return row;
+  });
+}
+
+/* 5.5 — Normaliza textos para comparação e pesquisa. */
+const norm = (v) =>
+  clean(v)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+/* 5.6 — Protege a interface contra HTML inserido nos dados. */
+const escapeHtml = (v) =>
+  clean(v).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
+
+/* 5.7 — Monta a URL de consulta ao SIG em WGS84. */
+const queryUrl = (base) =>
+  base +
+  "?" +
+  new URLSearchParams({
+    where: "1=1",
+    outFields: "*",
+    returnGeometry: "true",
+    outSR: "4326",
+    f: "geojson",
+  });
+
+/* 5.8 — Consulta uma camada do SIG e retorna GeoJSON. */
+async function getGeoJSON(url) {
+  const r = await fetch(queryUrl(url));
+
+  if (!r.ok) {
+    throw new Error("Falha ao consultar o SIG");
+  }
+
+  const j = await r.json();
+
+  if (j.error) {
+    throw new Error(
+      j.error.message || "Erro do serviço geográfico"
+    );
+  }
+
+  return j;
+}
+
+
+/* 5.9 — Agrupa os equipamentos em categorias de filtro. */
+function category(p) {
+  const s = norm(
+    [p.nome, p.tipoServico, p.tipoEquipamento].join(" ")
+  );
+
+  if (s.includes("cras")) return "CRAS";
+
+  if (s.includes("creas")) return "CREAS";
+
+  if (
+    s.includes("centropop") ||
+    s.includes("cipop")
+  ) {
+    return "Centro POP";
+  }
+
+  if (
+    s.includes("acolhimento") ||
+    s.includes("residenciainclusiva") ||
+    s.includes("hotel")
+  ) {
+    return "Unidade de Acolhimento";
+  }
+
+  if (s.includes("conselhotutelar")) {
+    return "Conselho Tutelar";
+  }
+
+  if (s.includes("bancoarariboia")) {
+    return "Banco Araribóia";
+  }
+
+  if (
+    s.includes("aliment") ||
+    s.includes("restaurante") ||
+    s.includes("gastronomia")
+  ) {
+    return "Segurança Alimentar";
+  }
+
+  if (
+    s.includes("economiasolidaria") ||
+    s.includes("ecosol")
+  ) {
+    return "Economia Solidária";
+  }
+
+  if (
+    s.includes("convivencia") ||
+    s.includes("scfv")
+  ) {
+    return "Centro de Convivência";
+  }
+
+  if (
+    s.includes("subsecretaria") ||
+    s.includes("conselhomunicipal") ||
+    s.includes("coordenadoria")
+  ) {
+    return "Gestão e Conselhos";
+  }
+
+  return "Outros serviços";
+}
+
+        
+     /* ====================================================================
+ * 6. CONSTRUÇÃO DA BASE DE EQUIPAMENTOS
+ * ====================================================================
+ *
+ * O CSV consolidado é a fonte principal dos equipamentos.
+ * Cada linha da planilha corresponde a um equipamento e contém
+ * seus dados cadastrais, territoriais e suas coordenadas.
+ *
+ * Esta função transforma as linhas do CSV no formato utilizado
+ * pelo restante da aplicação.
+ */
+
+function buildRecords(csvData) {
+  return csvData
+    .map((row) => {
+      const record = {
+        /* Identificação */
+        nome: clean(
+          row["Nome do equipamento/serviço"] ||
+          row["Nome do equipamento ou serviço"] ||
+          row["Nome"]
+        ),
+
+        /* Classificação */
+        tipoServico: clean(
+          row["Tipo do serviço"]
+        ),
+
+        tipoEquipamento: clean(
+          row["Tipo de Equipamento"] ||
+          row["Tipo de equipamento"]
+        ),
+
+        /* Localização */
+        endereco: clean(
+          row["Endereço"]
+        ),
+
+        bairro: clean(
+          row["Bairro"]
+        ),
+
+        regiao: clean(
+          row["Região de planejamento"] ||
+          row["Região administrativa"]
+        ),
+
+        latitude: parseCoordinate(
+          row["Latitude"]
+        ),
+
+        longitude: parseCoordinate(
+          row["Longitude"]
+        ),
+
+        /* Atendimento */
+        horario: clean(
+          row["Horário de funcionamento"]
+        ),
+
+        telefone: clean(
+          row["Telefone"]
+        ),
+
+        email: clean(
+          row["Email"] ||
+          row["E-mail"]
+        ),
+
+        /* Informações complementares */
+        abrangencia: clean(
+          row["Área de abrangência"]
+        ),
+
+        publico: clean(
+          row["Público"]
+        ),
+
+        observacao: clean(
+          row["Observação"]
+        ),
+
+        fonte: clean(
+          row["Fonte do registro"]
+        ),
+      };
+
+      /* Define a categoria utilizada nos filtros e nas cores do mapa. */
+      record.categoria = category(record);
+
+      return record;
+    })
+
+    /* Ignora eventuais linhas sem nome de equipamento. */
+    .filter((record) => record.nome)
+
+    /* Mantém os equipamentos em ordem alfabética. */
+    .sort((a, b) =>
+      a.nome.localeCompare(b.nome, "pt-BR")
+    );
+}
+
+/* Converte a base da Saúde sem misturar seus filtros aos da Assistência. */
+function buildHealthRecords(csvData) {
+  return csvData.map((row) => ({
+    sistema: "Saúde",
+    nome: clean(row["Nome do equipamento ou serviço"]),
+    tipoServico: clean(row["Tipo do serviço"]),
+    tipoEquipamento: clean(row["Tipo de Equipamento"]),
+    categoria: clean(row["Tipo do serviço"]),
+    endereco: clean(row["Endereço"]),
+    bairro: clean(row["Bairro"]),
+    regiao: clean(row["Região de Saúde"]),
+    latitude: parseCoordinate(row["Latitude"]),
+    longitude: parseCoordinate(row["Longitude"]),
+    horario: clean(row["Horário de funcionamento"]),
+    telefone: clean(row["Telefone"]),
+    email: clean(row["Email"]),
+    abrangencia: clean(row["Área de abrangência"]),
+    publico: clean(row["Público"]),
+    observacao: clean(row["Observação"]),
+    fonte: clean(row["Fonte do registro"]),
+    cnes: clean(row["CNES"]),
+  })).filter((record) => record.nome);
+}
+        /* ====================================================================
+         * 7. CONFIGURAÇÃO DO MAPA LEAFLET
+         * ==================================================================== */
+
+        /* Define zoom, centro inicial e limites de navegação. */
+        const map = L.map("map", {
+          zoomControl: true,
+          minZoom: 11,
+          maxZoom: 18,
+          preferCanvas: true,
+        }).setView([-22.895, -43.09], 12);
+        map.setMaxBounds([
+          [-23.08, -43.23],
+          [-22.75, -42.88],
+        ]);
+        /* Opções compartilhadas pelo mapa-base e pela camada de rótulos. */
+        const baseOpts = {
+          attribution: "Mapa &copy; Esri · Dados &copy; Prefeitura de Niterói",
+          maxNativeZoom: 16,
+          maxZoom: 18,
+          crossOrigin: true,
+          keepBuffer: 4,
+        };
+        L.tileLayer(
+          "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+          baseOpts,
+        ).addTo(map);
+        map.createPane("regionsPane");
+        map.getPane("regionsPane").style.zIndex = 320;
+        map.createPane("labelsPane");
+        map.getPane("labelsPane").style.zIndex = 450;
+        map.getPane("labelsPane").classList.add("leaflet-labels-pane");
+        L.tileLayer(
+          "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+          { ...baseOpts, pane: "labelsPane" },
+        ).addTo(map);
+        /* Camadas e estado central da interface. */
+        const regionLayer = L.layerGroup().addTo(map),
+          markerLayer = L.layerGroup().addTo(map),
+          healthMarkerLayer = L.layerGroup().addTo(map);
+        let records = [],
+          markers = [],
+          healthRecords = [],
+          healthMarkers = [],
+          selectedRegion = "Todas";
+        const activeTypes = new Set();
+        const activeHealthTypes = new Set();
+        /* ====================================================================
+         * 8. PAINEL DE DETALHES, MARCADORES E REGIÕES
+         * ==================================================================== */
+
+        /* Cria um campo do painel somente quando existe conteúdo. */
+        function field(label, value, { link = false } = {}) {
+          if (!clean(value)) return "";
+          const val = escapeHtml(value);
+          return `<div class="field"><b>${label}</b><div>${link ? `<a href="mailto:${val}">${val}</a>` : val}</div></div>`;
+        }
+        /* Abre o painel com as informações do equipamento selecionado. */
+        function showDetails(p) {
+          document.getElementById("drawer").classList.add("open");
+          const badge = document.getElementById("badge");
+          badge.textContent = p.categoria;
+          badge.style.background = TYPE_COLORS[p.categoria];
+          document.getElementById("title").textContent = p.nome;
+          document.getElementById("details").innerHTML =
+            field("Tipo do serviço", p.tipoServico) +
+            field("Tipo de equipamento", p.tipoEquipamento) +
+            field("Endereço", p.endereco) +
+            field("Bairro", p.bairro) +
+            field("Região administrativa", p.regiao) +
+            field("Horário de funcionamento", p.horario) +
+            field("Telefone", p.telefone) +
+            field("E-mail", p.email, { link: true }) +
+            field("Área de abrangência", p.abrangencia) +
+            field("Público", p.publico) +
+            field("Observação", p.observacao) +
+            field("CNES", p.cnes) +
+            field("Fonte do registro", p.fonte);
+        }
+        /* Define cor, tamanho e contorno dos pontos. */
+        function markerStyle(p, highlight = false) {
+          return {
+            radius: highlight ? 10 : 7,
+            color: "#fff",
+            weight: 2,
+            fillColor: (p.sistema === "Saúde" ? HEALTH_COLORS[p.categoria] : TYPE_COLORS[p.categoria]) || "#546e7a",
+            fillOpacity: 0.95,
+          };
+        }
+        /* Atualiza os pontos conforme os filtros ativos. */
+        function renderMarkers() {
+          markerLayer.clearLayers();
+          healthMarkerLayer.clearLayers();
+          let visible = 0;
+          markers.forEach(({ marker, record }) => {
+            const okRegion =
+              selectedRegion === "Todas" || record.regiao === selectedRegion;
+            const okType = activeTypes.has(record.categoria);
+            if (okRegion && okType) {
+              marker.addTo(markerLayer);
+              visible++;
+            }
+          });
+          healthMarkers.forEach(({ marker, record }) => {
+            if (activeHealthTypes.has(record.categoria)) {
+              marker.addTo(healthMarkerLayer);
+              visible++;
+            }
+          });
+          document.getElementById("count").textContent = visible;
+        }
+        /* Desenha e rotula as cinco regiões administrativas. */
+        function drawRegions(geo) {
+          regionLayer.clearLayers();
+          L.geoJSON(geo, {
+            pane: "regionsPane",
+            style: (f) => ({
+              color: REGION_COLORS[clean(f.properties.tx_nome)] || "#607d8b",
+              weight: 2,
+              fillColor:
+                REGION_COLORS[clean(f.properties.tx_nome)] || "#607d8b",
+              fillOpacity: 0.14,
+            }),
+            onEachFeature: (f, l) =>
+              l.bindTooltip(clean(f.properties.tx_nome), {
+                permanent: true,
+                direction: "center",
+                className: "region-label",
+              }),
+          }).addTo(regionLayer);
+        }
+        /* ====================================================================
+         * 9. FILTROS, BUSCA E NAVEGAÇÃO
+         * ==================================================================== */
+
+        /* Cria os botões de região e as caixas de tipo de serviço. */
+        function buildControls() {
+          const rg = document.getElementById("regions");
+          ["Todas", ...REGION_ORDER].forEach((name) => {
+            const b = document.createElement("button");
+            b.className =
+              "filter-btn" + (name === "Todas" ? " all active" : "");
+            b.textContent = name;
+            b.onclick = () => {
+              selectedRegion = name;
+              rg.querySelectorAll("button").forEach((x) =>
+                x.classList.remove("active"),
+              );
+              b.classList.add("active");
+              renderMarkers();
+            };
+            rg.appendChild(b);
+          });
+          const types = [...new Set(records.map((r) => r.categoria))].sort(
+              (a, b) => a.localeCompare(b, "pt-BR"),
+            ),
+            box = document.getElementById("types");
+          types.forEach((type) => {
+            activeTypes.add(type);
+            const label = document.createElement("label");
+            label.className = "check";
+            label.innerHTML = `<input type="checkbox" checked><span class="dot" style="background:${TYPE_COLORS[type]}"></span><span>${escapeHtml(type)}</span>`;
+            label.querySelector("input").onchange = (e) => {
+              e.target.checked
+                ? activeTypes.add(type)
+                : activeTypes.delete(type);
+              renderMarkers();
+            };
+            box.appendChild(label);
+          });
+          const healthBox = document.getElementById("healthTypes");
+          const healthTypes = [...new Set(healthMarkers.map((x) => x.record.categoria).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, "pt-BR"));
+          healthTypes.forEach((type) => {
+            activeHealthTypes.add(type);
+            const label = document.createElement("label");
+            label.className = "check";
+            label.innerHTML = `<input type="checkbox" checked><span class="dot" style="background:${HEALTH_COLORS[type] || "#0F766E"}"></span><span>${escapeHtml(type)}</span>`;
+            label.querySelector("input").onchange = (e) => {
+              e.target.checked
+                ? activeHealthTypes.add(type)
+                : activeHealthTypes.delete(type);
+              renderMarkers();
+            };
+            healthBox.appendChild(label);
+          });
+        }
+        /* Centraliza e destaca temporariamente um resultado. */
+        function focus(item) {
+          map.setView(item.marker.getLatLng(), 15, { animate: true });
+          showDetails(item.record);
+          item.marker.setStyle(markerStyle(item.record, true));
+          setTimeout(
+            () => item.marker.setStyle(markerStyle(item.record)),
+            1100,
+          );
+        }
+        /* Pesquisa nome, categoria, serviço, bairro, endereço e região. */
+        function setupSearch() {
+          const input = document.getElementById("search"),
+            results = document.getElementById("results");
+          input.addEventListener("input", () => {
+            const q = norm(input.value);
+            results.innerHTML = "";
+            if (q.length < 2) {
+              results.style.display = "none";
+              return;
+            }
+            const found = [...markers, ...healthMarkers]
+              .filter((x) =>
+                norm(
+                  [
+                    x.record.nome,
+                    x.record.categoria,
+                    x.record.tipoServico,
+                    x.record.bairro,
+                    x.record.endereco,
+                    x.record.regiao,
+                  ].join(" "),
+                ).includes(q),
+              )
+              .slice(0, 12);
+            found.forEach((item) => {
+              const div = document.createElement("div");
+              div.className = "result";
+              div.innerHTML = `<b>${escapeHtml(item.record.nome)}</b><span>${escapeHtml(item.record.categoria)} · ${escapeHtml(item.record.bairro)} · ${escapeHtml(item.record.regiao)}</span>`;
+              div.onclick = () => {
+                input.value = item.record.nome;
+                results.style.display = "none";
+                focus(item);
+              };
+              results.appendChild(div);
+            });
+            results.style.display = found.length ? "block" : "none";
+          });
+          map.on("click", () => (results.style.display = "none"));
+        }
+        
+  /* 
+   ====================================================================
+ * 10. INICIALIZAÇÃO DA APLICAÇÃO
+ * ====================================================================
+ *
+ * Carrega em paralelo a base consolidada de equipamentos e os limites
+ * das regiões administrativas, monta os marcadores e inicializa os
+ * controles da interface.
+ */
+        
+async function init() {
+  try {
+    /* Carrega as regiões, os bairros e a base consolidada. */
+const [regions, csvData, healthCsvData] = await Promise.all([
+  getGeoJSON(API.regions),
+  getCSV(DATA_URL),
+  getCSV(HEALTH_DATA_URL),
+]);
+
+    /* Constrói as bases das duas redes separadamente. */
+    records = buildRecords(csvData);
+    healthRecords = buildHealthRecords(healthCsvData);
+
+    console.log(
+  "Lélia Gonzalez:",
+  records.find((record) =>
+    norm(record.nome).includes("leliagonzalez")
+  )
+);
+
+    console.log(
+  "Banco Araribóia - Vila Ipiranga:",
+  records.find((record) =>
+    norm(record.nome).includes("vilaipiranga")
+  )
+);
+
+    /* Desenha as regiões administrativas. */
+    drawRegions(regions);
+
+    /* Cria os marcadores a partir de Latitude e Longitude do CSV. */
+    records.forEach((record) => {
+      const lat = record.latitude;
+      const lon = record.longitude;
+
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lon)
+      ) {
+        console.warn(
+          "Equipamento sem coordenadas válidas:",
+          record.nome
+        );
+        return;
+      }
+
+      const marker = L.circleMarker(
+        [lat, lon],
+        markerStyle(record)
+      ).bindTooltip(record.nome, {
+        direction: "top",
+        className: "equip-tooltip",
+      });
+
+      marker.on("click", () => {
+        showDetails(record);
+      });
+
+      markers.push({
+        marker,
+        record,
+      });
+    });
+
+    healthRecords.forEach((record) => {
+      const lat = record.latitude;
+      const lon = record.longitude;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      const marker = L.circleMarker([lat, lon], markerStyle(record), {
+        pane: "markerPane",
+      }).bindTooltip(record.nome, {
+        direction: "top",
+        className: "equip-tooltip",
+      });
+      marker.on("click", () => showDetails(record));
+      healthMarkers.push({ marker, record });
+    });
+
+    /* Monta filtros independentes para as duas redes. */
+    buildControls();
+    renderMarkers();
+    setupSearch();
+
+    /* Atualiza a informação exibida no painel lateral. */
+    document.getElementById("status").textContent =
+      `${records.length} registros de Assistência e ${healthRecords.length} registros de Saúde carregados. ` +
+      `${healthMarkers.length} pontos de Saúde com coordenadas; ${healthRecords.length - healthMarkers.length} sem ponto validado.`;
+
+    /* Ajusta o enquadramento inicial às regiões de Niterói. */
+    const bounds = L.geoJSON(regions).getBounds();
+
+    map.fitBounds(bounds, {
+      padding: [18, 18],
+    });
+
+    /* Remove a tela de carregamento. */
+    document.getElementById("loading").remove();
+
+  } catch (err) {
+    console.error(err);
+
+    document.getElementById("status").innerHTML =
+      '<span class="error">Não foi possível carregar os dados. Verifique a conexão e tente novamente.</span>';
+
+    const loading = document.getElementById("loading");
+
+    if (loading) {
+      loading.querySelector(".loading-card").textContent =
+        "Falha ao carregar o mapa de Niterói";
+    }
+  }
+}
+
+           
+        /* Eventos globais da interface. */
+        document.getElementById("showRegions").onchange = (e) =>
+          e.target.checked
+            ? regionLayer.addTo(map)
+            : map.removeLayer(regionLayer);
+
+        document.getElementById("close").onclick = () =>
+          document.getElementById("drawer").classList.remove("open");
+
+        /* Ponto de entrada da aplicação. */
+        init();
+
+      })();
+    </script>
+  </body>
+</html>
