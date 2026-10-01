@@ -18,7 +18,7 @@ O `index.html` carrega os dois CSVs pelos caminhos relativos `./dados/`. Mantenh
 
 ## Base da Saúde
 
-A planilha reúne 103 registros identificados nas páginas oficiais da Secretaria Municipal de Saúde e em camadas do SIG Niterói. Há coordenadas validadas no SIG para 45 Módulos de Médico da Família, 11 UBS e 2 registros do SAMU. Os outros 44 registros permanecem na planilha sem ponto no mapa até que seu endereço seja confirmado ou geocodificado com segurança.
+A planilha reúne 103 registros identificados nas páginas oficiais da Secretaria Municipal de Saúde e em camadas do SIG Niterói. Há coordenadas validadas no SIG para 45 Módulos de Médico da Família, 11 UBS, 2 registros do SAMU e equipamentos da RAPS, hospitais municipais e maternidade. Dois AASM que funcionam no mesmo endereço de UBS usam a coordenada SIG do equipamento co-localizado. Ao todo, 72 registros têm ponto mapeado; os outros 31 permanecem na planilha sem ponto até que seu endereço seja confirmado ou geocodificado com segurança.
 
 A rede municipal está separada de unidades estaduais, federais e da rede complementar. Os campos de origem, CNES, região de saúde e status de localização ajudam a revisar e atualizar os dados. Confira os endereços e horários com a unidade antes de usar a planilha como cadastro operacional.
 
